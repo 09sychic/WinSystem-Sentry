@@ -3,6 +3,8 @@ $WebhookUrl = "YOUR_WEBHOOK_HERE"
 # ---------------------
 
 $LastTitle = ""
+
+# Setup Windows API
 $Signature = @'
 [DllImport("user32.dll")]
 public static extern IntPtr GetForegroundWindow();
@@ -11,30 +13,33 @@ public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lp
 '@
 $User32 = Add-Type -MemberDefinition $Signature -Name "Win32Window" -Namespace Win32 -PassThru
 
-# Signal that monitoring has started
-try { Invoke-RestMethod -Uri $WebhookUrl -Method Post -Body (@{ content = " **Sentry Online:** Monitoring session started." } | ConvertTo-Json) -ContentType "application/json" } catch {}
+# Start Signal
+try { Invoke-RestMethod -Uri $WebhookUrl -Method Post -Body (@{ content = "🟢 **Sentry Online:** Tracking Active." } | ConvertTo-Json) -ContentType "application/json" } catch {}
 
-while ($true) {
-    # 1. Capture Active Window
-    $Handler = $User32::GetForegroundWindow()
-    $Builder = New-Object System.Text.StringBuilder 256
-    $User32::GetWindowText($Handler, $Builder, 256) | Out-Null
-    $CurrentTitle = $Builder.ToString()
+while($true) {
+    try {
+        $Handler = $User32::GetForegroundWindow()
+        $Builder = New-Object System.Text.StringBuilder 256
+        $null = $User32::GetWindowText($Handler, $Builder, 256)
+        $CurrentTitle = $Builder.ToString().Trim()
 
-    if ($CurrentTitle -and $CurrentTitle -ne $LastTitle) {
-        $Time = Get-Date -Format "HH:mm:ss"
-        $Payload = @{ content = " **Activity:** ``$CurrentTitle`` at $Time" } | ConvertTo-Json
-        try { Invoke-WebRequest -Uri $WebhookUrl -Method Post -Body $Payload -ContentType "application/json" } catch {}
-        $LastTitle = $CurrentTitle
-    }
-
-    # 2. Check for Lock Screen
-    if (Get-Process LogonUI -ErrorAction SilentlyContinue) {
-        if ($LastTitle -ne "LOCKED") {
-            try { Invoke-RestMethod -Uri $WebhookUrl -Method Post -Body (@{ content = " **Session:** Laptop Locked/User Away." } | ConvertTo-Json) -ContentType "application/json" } catch {}
-            $LastTitle = "LOCKED"
+        # Only send if title is not empty and has actually changed
+        if ($CurrentTitle -and $CurrentTitle -ne $LastTitle) {
+            $Payload = @{ content = "💻 **Activity:** ``$CurrentTitle``" } | ConvertTo-Json
+            Invoke-RestMethod -Uri $WebhookUrl -Method Post -Body $Payload -ContentType "application/json"
+            $LastTitle = $CurrentTitle
         }
-    }
 
-    Start-Sleep -Seconds 15
+        # Check for Lock Screen
+        if (Get-Process LogonUI -ErrorAction SilentlyContinue) {
+            if ($LastTitle -ne "LOCKED") {
+                Invoke-RestMethod -Uri $WebhookUrl -Method Post -Body (@{ content = "🔒 **Session:** Locked" } | ConvertTo-Json) -ContentType "application/json"
+                $LastTitle = "LOCKED"
+            }
+        }
+    } catch {
+        # Silent restart of the loop if an error occurs
+    }
+    
+    Start-Sleep -Seconds 10
 }
